@@ -1,0 +1,369 @@
+import logging
+from abc import ABC, abstractmethod
+from datetime import datetime
+
+# ================= LOGGER =================
+# Solo archivos para registro de eventos y errores, NO base de datos
+logging.basicConfig(
+    filename="errores.log",
+    level=logging.ERROR,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    encoding="utf-8"
+)
+
+def registrar_error(mensaje, exc=None):
+    if exc:
+        logging.error(f"{mensaje} | Detalle: {exc}")
+    else:
+        logging.error(mensaje)
+
+# ================= EXCEPCIONES PERSONALIZADAS =================
+class ErrorSistemaFJ(Exception):
+    """Excepción base del sistema"""
+    pass
+
+class DatosInvalidosError(ErrorSistemaFJ):
+    pass
+
+class ServicioNoDisponibleError(ErrorSistemaFJ):
+    pass
+
+class ReservaInvalidaError(ErrorSistemaFJ):
+    pass
+
+class OperacionNoPermitidaError(ErrorSistemaFJ):
+    pass
+
+class CalculoInconsistenteError(ErrorSistemaFJ):
+    pass
+
+# ================= CLASE ABSTRACTA GENERAL =================
+class Entidad(ABC):
+    def __init__(self, id_entidad: str):
+        if not id_entidad or not str(id_entidad).strip():
+            raise DatosInvalidosError("El ID de la entidad no puede estar vacío")
+        self._id = str(id_entidad).strip()
+        self._fecha_creacion = datetime.now()
+
+    @property
+    def id(self):
+        return self._id
+
+    @property
+    def fecha_creacion(self):
+        return self._fecha_creacion
+
+    @abstractmethod
+    def describir(self) -> str:
+        pass
+
+# ================= CLIENTE =================
+class Cliente(Entidad):
+    def __init__(self, id_cliente: str, nombre: str, email: str, telefono: str, edad: int):
+        super().__init__(id_cliente)
+        # Encapsulación: setters con validación
+        self.nombre = nombre
+        self.email = email
+        self.telefono = telefono
+        self.edad = edad
+
+    @property
+    def nombre(self):
+        return self._nombre
+    @nombre.setter
+    def nombre(self, valor):
+        if not valor or len(valor.strip()) < 3:
+            raise DatosInvalidosError("El nombre debe tener al menos 3 caracteres")
+        self._nombre = valor.strip().title()
+
+    @property
+    def email(self):
+        return self._email
+    @email.setter
+    def email(self, valor):
+        if "@" not in valor or "." not in valor:
+            raise DatosInvalidosError(f"Email inválido: {valor}")
+        self._email = valor.strip().lower()
+
+    @property
+    def telefono(self):
+        return self._telefono
+    @telefono.setter
+    def telefono(self, valor):
+        valor = str(valor).strip()
+        if not valor.isdigit() or len(valor) < 7:
+            raise DatosInvalidosError("Teléfono inválido, debe tener solo números y mínimo 7 dígitos")
+        self._telefono = valor
+
+    @property
+    def edad(self):
+        return self._edad
+    @edad.setter
+    def edad(self, valor):
+        try:
+            valor = int(valor)
+        except (ValueError, TypeError) as e:
+            raise DatosInvalidosError("La edad debe ser numérica") from e
+        if valor < 18 or valor > 120:
+            raise DatosInvalidosError("La edad debe estar entre 18 y 120")
+        self._edad = valor
+
+    def describir(self) -> str:
+        return f"Cliente [{self.id}] {self.nombre} - {self.email} - {self.telefono}"
+
+# ================= SERVICIO ABSTRACTO =================
+class Servicio(Entidad, ABC):
+    def __init__(self, id_servicio: str, nombre: str, precio_base: float, disponible: bool = True):
+        super().__init__(id_servicio)
+        if precio_base < 0:
+            raise CalculoInconsistenteError("El precio base no puede ser negativo")
+        self._nombre = nombre
+        self._precio_base = float(precio_base)
+        self._disponible = disponible
+
+    @property
+    def nombre(self):
+        return self._nombre
+    @property
+    def precio_base(self):
+        return self._precio_base
+    @property
+    def disponible(self):
+        return self._disponible
+
+    def cambiar_disponibilidad(self, estado: bool):
+        self._disponible = bool(estado)
+
+    def validar_disponibilidad(self):
+        if not self._disponible:
+            raise ServicioNoDisponibleError(f"El servicio '{self._nombre}' no está disponible")
+
+    @abstractmethod
+    def calcular_costo(self, duracion: float = 1, impuesto: float = 0.0, descuento: float = 0.0) -> float:
+        """Método polimórfico y sobrecargado por parámetros opcionales"""
+        pass
+
+    @abstractmethod
+    def validar_parametros(self, duracion: float):
+        pass
+
+    def describir(self) -> str:
+        estado = "Disponible" if self._disponible else "No disponible"
+        return f"Servicio [{self.id}] {self._nombre} - ${self._precio_base} - {estado}"
+
+# ================= 3 SERVICIOS ESPECIALIZADOS =================
+
+class ReservaSala(Servicio):
+    def __init__(self, id_servicio, nombre, precio_base, capacidad: int, disponible=True):
+        super().__init__(id_servicio, nombre, precio_base, disponible)
+        if capacidad <= 0:
+            raise DatosInvalidosError("La capacidad de la sala debe ser mayor a 0")
+        self._capacidad = capacidad
+
+    def validar_parametros(self, duracion: float):
+        if duracion <= 0 or duracion > 12:
+            raise DatosInvalidosError("La reserva de sala debe ser entre 1 y 12 horas")
+
+    # Sobrecarga simulada: duracion, impuesto, descuento opcionales
+    def calcular_costo(self, duracion: float = 1, impuesto: float = 0.19, descuento: float = 0.0) -> float:
+        self.validar_parametros(duracion)
+        subtotal = self._precio_base * duracion
+        total = subtotal * (1 + impuesto) * (1 - descuento)
+        if total < 0:
+            raise CalculoInconsistenteError("El costo calculado es inconsistente")
+        return round(total, 2)
+
+    def describir(self) -> str:
+        return super().describir() + f" | Sala capacidad {self._capacidad} personas"
+
+class AlquilerEquipo(Servicio):
+    def __init__(self, id_servicio, nombre, precio_base, cantidad_stock: int, disponible=True):
+        super().__init__(id_servicio, nombre, precio_base, disponible)
+        if cantidad_stock < 0:
+            raise DatosInvalidosError("El stock no puede ser negativo")
+        self._stock = cantidad_stock
+
+    def validar_parametros(self, duracion: float):
+        if duracion <= 0 or duracion > 30:
+            raise DatosInvalidosError("El alquiler debe ser entre 1 y 30 días")
+        if self._stock <= 0:
+            raise ServicioNoDisponibleError("No hay stock de este equipo")
+
+    def calcular_costo(self, duracion: float = 1, impuesto: float = 0.19, descuento: float = 0.0) -> float:
+        self.validar_parametros(duracion)
+        # Descuento por alquiler largo
+        if duracion >= 7:
+            descuento = max(descuento, 0.10)
+        total = (self._precio_base * duracion) * (1 + impuesto) * (1 - descuento)
+        return round(total, 2)
+
+    def describir(self) -> str:
+        return super().describir() + f" | Equipo - Stock: {self._stock}"
+
+class AsesoriaEspecializada(Servicio):
+    def __init__(self, id_servicio, nombre, precio_base, nivel: str, disponible=True):
+        super().__init__(id_servicio, nombre, precio_base, disponible)
+        if nivel.lower() not in ["basica", "avanzada", "experta"]:
+            raise DatosInvalidosError("Nivel debe ser: basica, avanzada o experta")
+        self._nivel = nivel.lower()
+
+    def validar_parametros(self, duracion: float):
+        if duracion <= 0 or duracion > 8:
+            raise DatosInvalidosError("La asesoría debe ser entre 1 y 8 horas")
+
+    def calcular_costo(self, duracion: float = 1, impuesto: float = 0.19, descuento: float = 0.0) -> float:
+        self.validar_parametros(duracion)
+        multiplicador = {"basica": 1.0, "avanzada": 1.5, "experta": 2.0}[self._nivel]
+        total = (self._precio_base * multiplicador * duracion) * (1 + impuesto) * (1 - descuento)
+        return round(total, 2)
+
+    def describir(self) -> str:
+        return super().describir() + f" | Asesoría nivel {self._nivel.capitalize()}"
+
+# ================= RESERVA =================
+class Reserva(Entidad):
+    ESTADOS = ["PENDIENTE", "CONFIRMADA", "CANCELADA", "PROCESADA"]
+
+    def __init__(self, id_reserva: str, cliente: Cliente, servicio: Servicio, duracion: float):
+        super().__init__(id_reserva)
+        if not isinstance(cliente, Cliente):
+            raise DatosInvalidosError("Se requiere un objeto Cliente válido")
+        if not isinstance(servicio, Servicio):
+            raise DatosInvalidosError("Se requiere un objeto Servicio válido")
+        self._cliente = cliente
+        self._servicio = servicio
+        self._duracion = duracion
+        self._estado = "PENDIENTE"
+        self._costo_total = 0.0
+
+    @property
+    def estado(self):
+        return self._estado
+    @property
+    def costo_total(self):
+        return self._costo_total
+
+    def confirmar(self):
+        try:
+            if self._estado != "PENDIENTE":
+                raise OperacionNoPermitidaError(f"No se puede confirmar una reserva en estado {self._estado}")
+            self._servicio.validar_disponibilidad()
+            self._servicio.validar_parametros(self._duracion)
+            self._costo_total = self._servicio.calcular_costo(self._duracion)
+            self._estado = "CONFIRMADA"
+        except (ServicioNoDisponibleError, DatosInvalidosError) as e:
+            registrar_error(f"Error al confirmar reserva {self.id}", e)
+            raise ReservaInvalidaError(f"No se pudo confirmar la reserva {self.id}") from e
+        else:
+            print(f"✅ Reserva {self.id} CONFIRMADA - Costo: ${self._costo_total}")
+        finally:
+            print(f"-> Intento de confirmación finalizado para {self.id}")
+
+    def cancelar(self):
+        try:
+            if self._estado == "CANCELADA":
+                raise OperacionNoPermitidaError("La reserva ya está cancelada")
+            if self._estado == "PROCESADA":
+                raise OperacionNoPermitidaError("No se puede cancelar una reserva ya procesada")
+            self._estado = "CANCELADA"
+        except OperacionNoPermitidaError as e:
+            registrar_error(f"Error al cancelar {self.id}", e)
+            raise
+        else:
+            print(f"❌ Reserva {self.id} CANCELADA")
+        finally:
+            print(f"-> Proceso de cancelación terminado para {self.id}")
+
+    def procesar(self):
+        try:
+            if self._estado != "CONFIRMADA":
+                raise OperacionNoPermitidaError(f"Solo se puede procesar una reserva CONFIRMADA, actual: {self._estado}")
+            self._estado = "PROCESADA"
+        except OperacionNoPermitidaError as e:
+            registrar_error(f"Error al procesar {self.id}", e)
+            raise ReservaInvalidaError("Fallo en procesamiento") from e
+        else:
+            print(f"🚀 Reserva {self.id} PROCESADA exitosamente")
+        finally:
+            print(f"-> Procesamiento finalizado para {self.id}")
+
+    def describir(self) -> str:
+        return f"Reserva [{self.id}] Cliente: {self._cliente.nombre} | Servicio: {self._servicio.nombre} | Duración: {self._duracion} | Estado: {self._estado} | Costo: ${self._costo_total}"
+
+# ================= GESTOR PRINCIPAL =================
+class SistemaFJ:
+    def __init__(self):
+        self.clientes = []  # Listas internas, sin BD
+        self.servicios = []
+        self.reservas = []
+
+    def agregar_cliente(self, cliente: Cliente):
+        self.clientes.append(cliente)
+        print(f"Cliente agregado: {cliente.describir()}")
+
+    def agregar_servicio(self, servicio: Servicio):
+        self.servicios.append(servicio)
+        print(f"Servicio agregado: {servicio.describir()}")
+
+    def crear_reserva(self, id_reserva, cliente, servicio, duracion):
+        reserva = Reserva(id_reserva, cliente, servicio, duracion)
+        self.reservas.append(reserva)
+        return reserva
+
+    def listar_todo(self):
+        print("\n--- CLIENTES ---")
+        for c in self.clientes: print(c.describir())
+        print("\n--- SERVICIOS (Polimorfismo) ---")
+        for s in self.servicios:
+            print(s.describir(), f"| Costo 2h/días: ${s.calcular_costo(2)}")
+        print("\n--- RESERVAS ---")
+        for r in self.reservas: print(r.describir())
+
+# ================= DEMO =================
+if __name__ == "__main__":
+    sistema = SistemaFJ()
+
+    # try/except/else/finally + encadenamiento
+    try:
+        c1 = Cliente("C001", "Carlos Arevalo", "carlos@email.com", "3001234567", 25)
+        sistema.agregar_cliente(c1)
+
+        # Cliente inválido para probar excepción
+        try:
+            c_malo = Cliente("C002", "Al", "correo-malo", "abc", 15)
+        except DatosInvalidosError as e:
+            registrar_error("Cliente inválido detectado", e)
+            print(f"⚠️ Cliente inválido capturado: {e}")
+
+        s1 = ReservaSala("S001", "Sala de Juntas A", 50000, capacidad=20)
+        s2 = AlquilerEquipo("S002", "Proyector 4K", 30000, cantidad_stock=5)
+        s3 = AsesoriaEspecializada("S003", "Asesoría en Python", 80000, nivel="experta")
+        s3.cambiar_disponibilidad(False) # Para probar error
+
+        sistema.agregar_servicio(s1)
+        sistema.agregar_servicio(s2)
+        sistema.agregar_servicio(s3)
+
+        r1 = sistema.crear_reserva("R001", c1, s1, 3)
+        r1.confirmar()
+        r1.procesar()
+
+        r2 = sistema.crear_reserva("R002", c1, s2, 2)
+        r2.confirmar()
+        r2.cancelar()
+
+        # Esto debe fallar: servicio no disponible
+        r3 = sistema.crear_reserva("R003", c1, s3, 2)
+        r3.confirmar()
+
+    except ErrorSistemaFJ as e:
+        print(f"❌ Error del sistema controlado, la app sigue viva: {e}")
+    except Exception as e:
+        registrar_error("Error inesperado", e)
+        print(f"Error inesperado: {e}")
+    else:
+        print("\n✅ Ejecución sin errores fatales")
+    finally:
+        print("\n--- RESUMEN FINAL ---")
+        sistema.listar_todo()
+        print("\nRevisa el archivo errores.log para ver los errores registrados")
