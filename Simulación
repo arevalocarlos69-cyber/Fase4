@@ -1,369 +1,676 @@
+
+import tkinter as tk
+from tkinter import ttk, messagebox
 import logging
+import math
+import re
 from abc import ABC, abstractmethod
-from datetime import datetime
 
-# ================= LOGGER =================
-# Solo archivos para registro de eventos y errores, NO base de datos
-logging.basicConfig(
-    filename="errores.log",
-    level=logging.ERROR,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    encoding="utf-8"
-)
+logging.basicConfig(filename="errores.log", level=logging.INFO,
+                    format="%(asctime)s | %(levelname)s | %(message)s", encoding="utf-8")
 
-def registrar_error(mensaje, exc=None):
-    if exc:
-        logging.error(f"{mensaje} | Detalle: {exc}")
-    else:
-        logging.error(mensaje)
+# Excepciones y validaciones
+class ErrorFJ(Exception): pass
+class DatosInvalidos(ErrorFJ): pass
+class NoDisponible(ErrorFJ): pass
+class ReservaInvalida(ErrorFJ): pass
+class OperacionProhibida(ErrorFJ): pass
+class CalculoInvalido(ErrorFJ): pass
 
-# ================= EXCEPCIONES PERSONALIZADAS =================
-class ErrorSistemaFJ(Exception):
-    """Excepción base del sistema"""
-    pass
+def texto(v, campo):
+    if not isinstance(v, str) or not v.strip():
+        raise DatosInvalidos(f"{campo} es obligatorio.")
+    return v.strip()
 
-class DatosInvalidosError(ErrorSistemaFJ):
-    pass
+def numero(v, campo, minimo=0, maximo=None):
+    try:
+        if isinstance(v, bool): raise ValueError()
+        n = float(v)
+        if not math.isfinite(n) or n < minimo or (maximo is not None and n > maximo):
+            raise ValueError()
+        return n
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise DatosInvalidos(
+            f"{campo}: ingrese un valor entre {minimo} y "
+            f"{maximo if maximo is not None else 'un valor mayor'}."
+        ) from exc
 
-class ServicioNoDisponibleError(ErrorSistemaFJ):
-    pass
+def entero(v, campo, minimo=0, maximo=None):
+    n = numero(v, campo, minimo, maximo)
+    if not n.is_integer():
+        raise DatosInvalidos(f"{campo} debe ser un numero entero.")
+    return int(n)
 
-class ReservaInvalidaError(ErrorSistemaFJ):
-    pass
-
-class OperacionNoPermitidaError(ErrorSistemaFJ):
-    pass
-
-class CalculoInconsistenteError(ErrorSistemaFJ):
-    pass
-
-# ================= CLASE ABSTRACTA GENERAL =================
+# Abstraccion, encapsulacion y herencia
 class Entidad(ABC):
-    def __init__(self, id_entidad: str):
-        if not id_entidad or not str(id_entidad).strip():
-            raise DatosInvalidosError("El ID de la entidad no puede estar vacío")
-        self._id = str(id_entidad).strip()
-        self._fecha_creacion = datetime.now()
+    def __init__(self, codigo):
+        self._codigo = texto(codigo, "Identificador")
 
     @property
-    def id(self):
-        return self._id
-
-    @property
-    def fecha_creacion(self):
-        return self._fecha_creacion
+    def codigo(self): return self._codigo
 
     @abstractmethod
-    def describir(self) -> str:
-        pass
+    def describir(self): pass
 
-# ================= CLIENTE =================
 class Cliente(Entidad):
-    def __init__(self, id_cliente: str, nombre: str, email: str, telefono: str, edad: int):
-        super().__init__(id_cliente)
-        # Encapsulación: setters con validación
-        self.nombre = nombre
-        self.email = email
-        self.telefono = telefono
-        self.edad = edad
+    def __init__(self, codigo, nombre, correo, telefono, edad):
+        super().__init__(codigo)
+        self.nombre, self.correo, self.telefono, self.edad = nombre, correo, telefono, edad
 
     @property
-    def nombre(self):
-        return self._nombre
+    def nombre(self): return self._nombre
+
     @nombre.setter
-    def nombre(self, valor):
-        if not valor or len(valor.strip()) < 3:
-            raise DatosInvalidosError("El nombre debe tener al menos 3 caracteres")
-        self._nombre = valor.strip().title()
+    def nombre(self, v):
+        v = texto(v, "Nombre")
+        if len(v) < 3: raise DatosInvalidos("El nombre requiere al menos 3 caracteres.")
+        self._nombre = v.title()
 
     @property
-    def email(self):
-        return self._email
-    @email.setter
-    def email(self, valor):
-        if "@" not in valor or "." not in valor:
-            raise DatosInvalidosError(f"Email inválido: {valor}")
-        self._email = valor.strip().lower()
+    def correo(self): return self._correo
+
+    @correo.setter
+    def correo(self, v):
+        v = texto(v, "Correo")
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@.]+", v):
+            raise DatosInvalidos("Correo electronico invalido.")
+        self._correo = v.lower()
 
     @property
-    def telefono(self):
-        return self._telefono
+    def telefono(self): return self._telefono
+
     @telefono.setter
-    def telefono(self, valor):
-        valor = str(valor).strip()
-        if not valor.isdigit() or len(valor) < 7:
-            raise DatosInvalidosError("Teléfono inválido, debe tener solo números y mínimo 7 dígitos")
-        self._telefono = valor
+    def telefono(self, v):
+        v = texto(v, "Telefono")
+        if not v.isascii() or not v.isdigit() or not 7 <= len(v) <= 15:
+            raise DatosInvalidos("El telefono requiere entre 7 y 15 digitos.")
+        self._telefono = v
 
     @property
-    def edad(self):
-        return self._edad
+    def edad(self): return self._edad
+
     @edad.setter
-    def edad(self, valor):
-        try:
-            valor = int(valor)
-        except (ValueError, TypeError) as e:
-            raise DatosInvalidosError("La edad debe ser numérica") from e
-        if valor < 18 or valor > 120:
-            raise DatosInvalidosError("La edad debe estar entre 18 y 120")
-        self._edad = valor
+    def edad(self, v):
+        self._edad = entero(v, "Edad", 18, 120)
 
-    def describir(self) -> str:
-        return f"Cliente [{self.id}] {self.nombre} - {self.email} - {self.telefono}"
+    def describir(self):
+        return (f"{self.codigo} | {self.nombre} | {self.correo} | "
+                f"{self.telefono} | {self.edad} anos")
 
-# ================= SERVICIO ABSTRACTO =================
+# Polimorfismo y calculos con parametros opcionales
 class Servicio(Entidad, ABC):
-    def __init__(self, id_servicio: str, nombre: str, precio_base: float, disponible: bool = True):
-        super().__init__(id_servicio)
-        if precio_base < 0:
-            raise CalculoInconsistenteError("El precio base no puede ser negativo")
-        self._nombre = nombre
-        self._precio_base = float(precio_base)
-        self._disponible = disponible
-
-    @property
-    def nombre(self):
-        return self._nombre
-    @property
-    def precio_base(self):
-        return self._precio_base
-    @property
-    def disponible(self):
-        return self._disponible
-
-    def cambiar_disponibilidad(self, estado: bool):
-        self._disponible = bool(estado)
-
-    def validar_disponibilidad(self):
-        if not self._disponible:
-            raise ServicioNoDisponibleError(f"El servicio '{self._nombre}' no está disponible")
-
-    @abstractmethod
-    def calcular_costo(self, duracion: float = 1, impuesto: float = 0.0, descuento: float = 0.0) -> float:
-        """Método polimórfico y sobrecargado por parámetros opcionales"""
-        pass
-
-    @abstractmethod
-    def validar_parametros(self, duracion: float):
-        pass
-
-    def describir(self) -> str:
-        estado = "Disponible" if self._disponible else "No disponible"
-        return f"Servicio [{self.id}] {self._nombre} - ${self._precio_base} - {estado}"
-
-# ================= 3 SERVICIOS ESPECIALIZADOS =================
-
-class ReservaSala(Servicio):
-    def __init__(self, id_servicio, nombre, precio_base, capacidad: int, disponible=True):
-        super().__init__(id_servicio, nombre, precio_base, disponible)
-        if capacidad <= 0:
-            raise DatosInvalidosError("La capacidad de la sala debe ser mayor a 0")
-        self._capacidad = capacidad
-
-    def validar_parametros(self, duracion: float):
-        if duracion <= 0 or duracion > 12:
-            raise DatosInvalidosError("La reserva de sala debe ser entre 1 y 12 horas")
-
-    # Sobrecarga simulada: duracion, impuesto, descuento opcionales
-    def calcular_costo(self, duracion: float = 1, impuesto: float = 0.19, descuento: float = 0.0) -> float:
-        self.validar_parametros(duracion)
-        subtotal = self._precio_base * duracion
-        total = subtotal * (1 + impuesto) * (1 - descuento)
-        if total < 0:
-            raise CalculoInconsistenteError("El costo calculado es inconsistente")
-        return round(total, 2)
-
-    def describir(self) -> str:
-        return super().describir() + f" | Sala capacidad {self._capacidad} personas"
-
-class AlquilerEquipo(Servicio):
-    def __init__(self, id_servicio, nombre, precio_base, cantidad_stock: int, disponible=True):
-        super().__init__(id_servicio, nombre, precio_base, disponible)
-        if cantidad_stock < 0:
-            raise DatosInvalidosError("El stock no puede ser negativo")
-        self._stock = cantidad_stock
-
-    def validar_parametros(self, duracion: float):
-        if duracion <= 0 or duracion > 30:
-            raise DatosInvalidosError("El alquiler debe ser entre 1 y 30 días")
-        if self._stock <= 0:
-            raise ServicioNoDisponibleError("No hay stock de este equipo")
-
-    def calcular_costo(self, duracion: float = 1, impuesto: float = 0.19, descuento: float = 0.0) -> float:
-        self.validar_parametros(duracion)
-        # Descuento por alquiler largo
-        if duracion >= 7:
-            descuento = max(descuento, 0.10)
-        total = (self._precio_base * duracion) * (1 + impuesto) * (1 - descuento)
-        return round(total, 2)
-
-    def describir(self) -> str:
-        return super().describir() + f" | Equipo - Stock: {self._stock}"
-
-class AsesoriaEspecializada(Servicio):
-    def __init__(self, id_servicio, nombre, precio_base, nivel: str, disponible=True):
-        super().__init__(id_servicio, nombre, precio_base, disponible)
-        if nivel.lower() not in ["basica", "avanzada", "experta"]:
-            raise DatosInvalidosError("Nivel debe ser: basica, avanzada o experta")
-        self._nivel = nivel.lower()
-
-    def validar_parametros(self, duracion: float):
-        if duracion <= 0 or duracion > 8:
-            raise DatosInvalidosError("La asesoría debe ser entre 1 y 8 horas")
-
-    def calcular_costo(self, duracion: float = 1, impuesto: float = 0.19, descuento: float = 0.0) -> float:
-        self.validar_parametros(duracion)
-        multiplicador = {"basica": 1.0, "avanzada": 1.5, "experta": 2.0}[self._nivel]
-        total = (self._precio_base * multiplicador * duracion) * (1 + impuesto) * (1 - descuento)
-        return round(total, 2)
-
-    def describir(self) -> str:
-        return super().describir() + f" | Asesoría nivel {self._nivel.capitalize()}"
-
-# ================= RESERVA =================
-class Reserva(Entidad):
-    ESTADOS = ["PENDIENTE", "CONFIRMADA", "CANCELADA", "PROCESADA"]
-
-    def __init__(self, id_reserva: str, cliente: Cliente, servicio: Servicio, duracion: float):
-        super().__init__(id_reserva)
-        if not isinstance(cliente, Cliente):
-            raise DatosInvalidosError("Se requiere un objeto Cliente válido")
-        if not isinstance(servicio, Servicio):
-            raise DatosInvalidosError("Se requiere un objeto Servicio válido")
-        self._cliente = cliente
-        self._servicio = servicio
-        self._duracion = duracion
-        self._estado = "PENDIENTE"
-        self._costo_total = 0.0
-
-    @property
-    def estado(self):
-        return self._estado
-    @property
-    def costo_total(self):
-        return self._costo_total
-
-    def confirmar(self):
+    def __init__(self, codigo, nombre, precio):
+        super().__init__(codigo)
+        self.nombre = texto(nombre, "Servicio")
         try:
-            if self._estado != "PENDIENTE":
-                raise OperacionNoPermitidaError(f"No se puede confirmar una reserva en estado {self._estado}")
-            self._servicio.validar_disponibilidad()
-            self._servicio.validar_parametros(self._duracion)
-            self._costo_total = self._servicio.calcular_costo(self._duracion)
-            self._estado = "CONFIRMADA"
-        except (ServicioNoDisponibleError, DatosInvalidosError) as e:
-            registrar_error(f"Error al confirmar reserva {self.id}", e)
-            raise ReservaInvalidaError(f"No se pudo confirmar la reserva {self.id}") from e
+            self.precio = numero(precio, "Precio")
+        except DatosInvalidos as exc:
+            raise CalculoInvalido(str(exc)) from exc
+        self.disponible = True
+
+    def verificar(self):
+        if not self.disponible:
+            raise NoDisponible(f"{self.nombre} esta inactivo.")
+
+    def total(self, base, impuesto, descuento):
+        try:
+            i = numero(impuesto, "Impuesto", 0, 1)
+            d = numero(descuento, "Descuento", 0, 1)
+            resultado = base * (1 + i) * (1 - d)
+            if not math.isfinite(resultado): raise ValueError()
+            return round(resultado, 2)
+        except (DatosInvalidos, ValueError, OverflowError) as exc:
+            raise CalculoInvalido("Impuesto, descuento o resultado de costo invalido.") from exc
+
+    @abstractmethod
+    def validar_duracion(self, duracion): pass
+
+    @abstractmethod
+    def calcular_costo(self, duracion=1, impuesto=0.19, descuento=0): pass
+
+    @abstractmethod
+    def regla(self): pass
+
+    def describir(self):
+        estado = "Activo" if self.disponible else "Inactivo"
+        return f"{self.codigo} | {self.nombre} | ${self.precio:,.0f} | {estado}"
+
+class Sala(Servicio):
+    def __init__(self, codigo, nombre, precio, capacidad):
+        super().__init__(codigo, nombre, precio)
+        self.capacidad = entero(capacidad, "Capacidad", 1)
+
+    def regla(self): return "Sala: de 1 a 12 horas"
+
+    def validar_duracion(self, v):
+        return entero(v, "Horas de sala (1 a 12)", 1, 12)
+
+    def calcular_costo(self, duracion=1, impuesto=0.19, descuento=0):
+        self.verificar()
+        return self.total(self.precio * self.validar_duracion(duracion), impuesto, descuento)
+
+    def describir(self):
+        return super().describir() + f" | Capacidad: {self.capacidad}"
+
+class Equipo(Servicio):
+    def __init__(self, codigo, nombre, precio, stock):
+        super().__init__(codigo, nombre, precio)
+        self.stock = entero(stock, "Stock", 0)
+
+    def regla(self): return "Equipo: de 1 a 30 dias; 10% de descuento desde 7 dias"
+
+    def verificar(self):
+        super().verificar()
+        if self.stock <= 0:
+            raise NoDisponible("Equipo sin unidades disponibles.")
+
+    def validar_duracion(self, v):
+        return entero(v, "Dias de equipo (1 a 30)", 1, 30)
+
+    def calcular_costo(self, duracion=1, impuesto=0.19, descuento=0):
+        self.verificar()
+        dias = self.validar_duracion(duracion)
+        d = numero(descuento, "Descuento", 0, 1)
+        return self.total(self.precio * dias, impuesto, max(d, 0.10) if dias >= 7 else d)
+
+    def describir(self):
+        return super().describir() + f" | Stock: {self.stock}"
+
+class Asesoria(Servicio):
+    def __init__(self, codigo, nombre, precio, nivel):
+        super().__init__(codigo, nombre, precio)
+        self.nivel = texto(nivel, "Nivel").lower()
+        if self.nivel not in ("basica", "avanzada", "experta"):
+            raise DatosInvalidos("Nivel: basica, avanzada o experta.")
+
+    def regla(self): return "Asesoria: de 1 a 8 horas"
+
+    def validar_duracion(self, v):
+        return entero(v, "Horas de asesoria (1 a 8)", 1, 8)
+
+    def calcular_costo(self, duracion=1, impuesto=0.19, descuento=0):
+        self.verificar()
+        factor = {"basica": 1, "avanzada": 1.5, "experta": 2}[self.nivel]
+        return self.total(self.precio * self.validar_duracion(duracion) * factor, impuesto, descuento)
+
+    def describir(self):
+        return super().describir() + f" | Nivel: {self.nivel}"
+
+# Estados de reserva y excepciones encadenadas
+class Reserva(Entidad):
+    def __init__(self, codigo, cliente, servicio, duracion):
+        super().__init__(codigo)
+        self.cliente, self.servicio, self.duracion = cliente, servicio, duracion
+        self.estado, self.costo = "PENDIENTE", 0
+
+    def confirmar(self, impuesto=0.19, descuento=0):
+        try:
+            if self.estado != "PENDIENTE":
+                raise OperacionProhibida(f"Estado actual: {self.estado}.")
+            costo = self.servicio.calcular_costo(self.duracion, impuesto, descuento)
+            if isinstance(self.servicio, Equipo): self.servicio.stock -= 1
+            self.costo, self.estado = costo, "CONFIRMADA"
+        except OperacionProhibida:
+            raise
+        except ErrorFJ as exc:
+            raise ReservaInvalida(f"No se puede confirmar: {exc}") from exc
         else:
-            print(f"✅ Reserva {self.id} CONFIRMADA - Costo: ${self._costo_total}")
+            logging.info("Reserva %s confirmada por %.2f", self.codigo, self.costo)
+            return self.costo
         finally:
-            print(f"-> Intento de confirmación finalizado para {self.id}")
+            logging.info("Fin de confirmacion %s", self.codigo)
 
     def cancelar(self):
         try:
-            if self._estado == "CANCELADA":
-                raise OperacionNoPermitidaError("La reserva ya está cancelada")
-            if self._estado == "PROCESADA":
-                raise OperacionNoPermitidaError("No se puede cancelar una reserva ya procesada")
-            self._estado = "CANCELADA"
-        except OperacionNoPermitidaError as e:
-            registrar_error(f"Error al cancelar {self.id}", e)
+            if self.estado in ("CANCELADA", "PROCESADA"):
+                raise OperacionProhibida(f"No se puede cancelar: {self.estado}.")
+            if self.estado == "CONFIRMADA" and isinstance(self.servicio, Equipo):
+                self.servicio.stock += 1
+            self.estado = "CANCELADA"
+        except OperacionProhibida:
             raise
         else:
-            print(f"❌ Reserva {self.id} CANCELADA")
+            logging.info("Reserva %s cancelada", self.codigo)
         finally:
-            print(f"-> Proceso de cancelación terminado para {self.id}")
+            logging.info("Fin de cancelacion %s", self.codigo)
 
     def procesar(self):
         try:
-            if self._estado != "CONFIRMADA":
-                raise OperacionNoPermitidaError(f"Solo se puede procesar una reserva CONFIRMADA, actual: {self._estado}")
-            self._estado = "PROCESADA"
-        except OperacionNoPermitidaError as e:
-            registrar_error(f"Error al procesar {self.id}", e)
-            raise ReservaInvalidaError("Fallo en procesamiento") from e
+            if self.estado != "CONFIRMADA":
+                raise OperacionProhibida("Solo se procesan reservas confirmadas.")
+            self.estado = "PROCESADA"
+        except OperacionProhibida:
+            raise
         else:
-            print(f"🚀 Reserva {self.id} PROCESADA exitosamente")
+            logging.info("Reserva %s procesada", self.codigo)
         finally:
-            print(f"-> Procesamiento finalizado para {self.id}")
+            logging.info("Fin de procesamiento %s", self.codigo)
 
-    def describir(self) -> str:
-        return f"Reserva [{self.id}] Cliente: {self._cliente.nombre} | Servicio: {self._servicio.nombre} | Duración: {self._duracion} | Estado: {self._estado} | Costo: ${self._costo_total}"
+    def describir(self):
+        return (f"{self.codigo} | {self.cliente.nombre} | {self.servicio.nombre} | "
+                f"{self.duracion} | {self.estado} | ${self.costo:,.2f}")
 
-# ================= GESTOR PRINCIPAL =================
+# Almacenamiento temporal en listas
 class SistemaFJ:
     def __init__(self):
-        self.clientes = []  # Listas internas, sin BD
-        self.servicios = []
-        self.reservas = []
+        self.clientes, self.servicios, self.reservas = [], [], []
 
-    def agregar_cliente(self, cliente: Cliente):
-        self.clientes.append(cliente)
-        print(f"Cliente agregado: {cliente.describir()}")
+    def buscar(self, lista, codigo):
+        return next((x for x in lista if x.codigo == codigo), None)
 
-    def agregar_servicio(self, servicio: Servicio):
-        self.servicios.append(servicio)
-        print(f"Servicio agregado: {servicio.describir()}")
+    def agregar(self, lista, objeto):
+        if self.buscar(lista, objeto.codigo):
+            raise OperacionProhibida(f"Codigo duplicado: {objeto.codigo}")
+        lista.append(objeto)
+        logging.info("Registro creado: %s", objeto.codigo)
+        return objeto
 
-    def crear_reserva(self, id_reserva, cliente, servicio, duracion):
-        reserva = Reserva(id_reserva, cliente, servicio, duracion)
-        self.reservas.append(reserva)
-        return reserva
+    def crear_reserva(self, codigo, id_cliente, id_servicio, duracion):
+        cliente = self.buscar(self.clientes, id_cliente)
+        servicio = self.buscar(self.servicios, id_servicio)
+        if not cliente or not servicio:
+            raise DatosInvalidos("Seleccione un cliente y un servicio registrados.")
+        duracion = servicio.validar_duracion(duracion)
+        return self.agregar(self.reservas, Reserva(codigo, cliente, servicio, duracion))
 
-    def listar_todo(self):
-        print("\n--- CLIENTES ---")
-        for c in self.clientes: print(c.describir())
-        print("\n--- SERVICIOS (Polimorfismo) ---")
-        for s in self.servicios:
-            print(s.describir(), f"| Costo 2h/días: ${s.calcular_costo(2)}")
-        print("\n--- RESERVAS ---")
-        for r in self.reservas: print(r.describir())
+    def resumen(self):
+        partes = []
+        for titulo, lista in (("CLIENTES", self.clientes), ("SERVICIOS", self.servicios),
+                              ("RESERVAS", self.reservas)):
+            partes.append(f"\n--- {titulo} ({len(lista)}) ---")
+            partes.extend(x.describir() for x in lista)
+        return "\n".join(partes)
 
-# ================= DEMO =================
-if __name__ == "__main__":
-    sistema = SistemaFJ()
+# Simulacion: operaciones independientes y errores controlados
+def simular():
+    s, salida = SistemaFJ(), []
+    exitos, errores, fallos = 0, 0, 0
 
-    # try/except/else/finally + encadenamiento
-    try:
-        c1 = Cliente("C001", "Carlos Arevalo", "carlos@email.com", "3001234567", 25)
-        sistema.agregar_cliente(c1)
-
-        # Cliente inválido para probar excepción
+    def probar(nombre, accion, debe_fallar=False):
+        nonlocal exitos, errores, fallos
         try:
-            c_malo = Cliente("C002", "Al", "correo-malo", "abc", 15)
-        except DatosInvalidosError as e:
-            registrar_error("Cliente inválido detectado", e)
-            print(f"⚠️ Cliente inválido capturado: {e}")
+            resultado = accion()
+        except ErrorFJ as exc:
+            logging.error("Simulacion %s: %s", nombre, exc, exc_info=True)
+            if debe_fallar:
+                errores += 1
+                salida.append(f"ERROR ESPERADO | {nombre} | {exc}")
+            else:
+                fallos += 1
+                salida.append(f"FALLO NO PREVISTO | {nombre} | {exc}")
+        except Exception as exc:
+            fallos += 1
+            logging.exception("Error inesperado: %s", nombre)
+            salida.append(f"ERROR INESPERADO | {nombre} | {exc}")
+        else:
+            if debe_fallar:
+                fallos += 1
+                salida.append(f"FALLO: debio rechazarse | {nombre}")
+            else:
+                exitos += 1
+                detalle = f" | {resultado}" if resultado is not None else ""
+                salida.append(f"CORRECTO | {nombre}{detalle}")
+        finally:
+            logging.info("Fin de operacion: %s", nombre)
 
-        s1 = ReservaSala("S001", "Sala de Juntas A", 50000, capacidad=20)
-        s2 = AlquilerEquipo("S002", "Proyector 4K", 30000, cantidad_stock=5)
-        s3 = AsesoriaEspecializada("S003", "Asesoría en Python", 80000, nivel="experta")
-        s3.cambiar_disponibilidad(False) # Para probar error
+    c = Cliente("C01", "Carlos Arevalo", "carlos@mail.com", "3001234567", 25)
+    sala = Sala("S01", "Sala de juntas", 50000, 20)
+    equipo = Equipo("S02", "Proyector 4K", 30000, 1)
+    asesoria = Asesoria("S03", "Asesoria Python", 80000, "experta")
 
-        sistema.agregar_servicio(s1)
-        sistema.agregar_servicio(s2)
-        sistema.agregar_servicio(s3)
+    probar("01 Cliente valido", lambda: s.agregar(s.clientes, c).codigo)
+    probar("02 Cliente invalido", lambda: Cliente("C02", "Al", "correo", "abc", 15), True)
+    probar("03 Cliente duplicado", lambda: s.agregar(s.clientes, c), True)
+    probar("04 Sala valida", lambda: s.agregar(s.servicios, sala).codigo)
+    probar("05 Precio negativo", lambda: Sala("S04", "Sala incorrecta", -5000, 10), True)
+    probar("06 Equipo valido", lambda: s.agregar(s.servicios, equipo).codigo)
+    probar("07 Asesoria valida", lambda: s.agregar(s.servicios, asesoria).codigo)
+    probar("08 Nivel invalido", lambda: Asesoria("S05", "Consultoria", 50000, "otro"), True)
+    probar("09 Costo con descuento", lambda: sala.calcular_costo(2, descuento=0.10))
+    probar("10 Impuesto invalido", lambda: sala.calcular_costo(2, impuesto=-0.5), True)
 
-        r1 = sistema.crear_reserva("R001", c1, s1, 3)
-        r1.confirmar()
-        r1.procesar()
+    def crear_confirmar(codigo, sid, duracion):
+        return s.crear_reserva(codigo, "C01", sid, duracion).confirmar()
 
-        r2 = sistema.crear_reserva("R002", c1, s2, 2)
-        r2.confirmar()
-        r2.cancelar()
+    probar("11 Reserva de sala", lambda: crear_confirmar("R01", "S01", 3))
+    probar("12 Procesar reserva", lambda: s.buscar(s.reservas, "R01").procesar())
+    probar("13 Cancelar procesada", lambda: s.buscar(s.reservas, "R01").cancelar(), True)
+    probar("14 Alquiler de equipo", lambda: crear_confirmar("R02", "S02", 2))
+    probar("15 Sin stock", lambda: crear_confirmar("R03", "S02", 2), True)
+    probar("16 Cancelar y devolver", lambda: s.buscar(s.reservas, "R02").cancelar())
+    probar("17 Reserva tras devolucion", lambda: s.buscar(s.reservas, "R03").confirmar())
 
-        # Esto debe fallar: servicio no disponible
-        r3 = sistema.crear_reserva("R003", c1, s3, 2)
-        r3.confirmar()
+    def inactivar():
+        asesoria.disponible = False
+        return s.crear_reserva("R04", "C01", "S03", 2).confirmar()
 
-    except ErrorSistemaFJ as e:
-        print(f"❌ Error del sistema controlado, la app sigue viva: {e}")
-    except Exception as e:
-        registrar_error("Error inesperado", e)
-        print(f"Error inesperado: {e}")
-    else:
-        print("\n✅ Ejecución sin errores fatales")
-    finally:
-        print("\n--- RESUMEN FINAL ---")
-        sistema.listar_todo()
-        print("\nRevisa el archivo errores.log para ver los errores registrados")
+    probar("18 Servicio inactivo", inactivar, True)
+
+    def reactivar():
+        asesoria.disponible = True
+        return s.buscar(s.reservas, "R04").confirmar()
+
+    probar("19 Servicio reactivado", reactivar)
+    probar("20 Confirmacion repetida", lambda: s.buscar(s.reservas, "R04").confirmar(), True)
+    probar("21 ID repetido", lambda: s.crear_reserva("R04", "C01", "S01", 1), True)
+    probar("22 Duracion invalida", lambda: s.crear_reserva("R05", "C01", "S01", 50), True)
+    probar("23 Reserva inexistente", lambda: procesar_reserva(s, "R05"), True)
+
+    informe = (f"SIMULACION: {exitos + errores + fallos} operaciones\n"
+               f"Exitosas: {exitos} | Errores esperados: {errores} | Fallos: {fallos}\n\n")
+    return informe + "\n".join(salida) + "\n" + s.resumen()
+
+def procesar_reserva(sistema, codigo):
+    r = sistema.buscar(sistema.reservas, codigo)
+    if r is None:
+        raise ReservaInvalida(f"Reserva {codigo} inexistente.")
+    return r.procesar()
+
+# Interfaz grafica y seleccion de registros
+class Aplicacion(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.s = SistemaFJ()
+        self.title("Software FJ - Clientes, servicios y reservas")
+        self.geometry("940x690")
+        self.minsize(780, 570)
+        ttk.Label(self, text="SOFTWARE FJ | SISTEMA DE GESTION",
+                  font=("Arial", 17, "bold")).pack(pady=12)
+        self.tabs = ttk.Notebook(self)
+        self.tabs.pack(fill="both", expand=True, padx=12, pady=8)
+        self.paginas = {}
+        for nombre in ("Clientes", "Servicios", "Reservas", "Consultas", "Simulacion"):
+            p = ttk.Frame(self.tabs, padding=14)
+            self.tabs.add(p, text=nombre)
+            self.paginas[nombre] = p
+        self.crear_clientes()
+        self.crear_servicios()
+        self.crear_reservas()
+        self.crear_consultas()
+        self.crear_simulacion()
+        self.tabs.bind("<<NotebookTabChanged>>", lambda e: self.actualizar())
+        self.actualizar()
+
+    def campos(self, p, nombres, inicio=0):
+        datos = {}
+        for fila, nombre in enumerate(nombres, inicio):
+            ttk.Label(p, text=nombre).grid(
+                row=fila, column=0, sticky="w", padx=8, pady=7)
+            entrada = ttk.Entry(p, width=45)
+            entrada.grid(row=fila, column=1, sticky="ew", padx=8, pady=7)
+            datos[nombre] = entrada
+        p.columnconfigure(1, weight=1)
+        return datos
+
+    def valor(self, datos, campo):
+        return datos[campo].get().strip()
+
+    def ejecutar(self, accion, mensaje):
+        try:
+            resultado = accion()
+        except ErrorFJ as exc:
+            logging.error("Error controlado: %s", exc, exc_info=True)
+            messagebox.showerror("Revise los datos", str(exc))
+            return None
+        except Exception:
+            logging.exception("Error inesperado en la interfaz")
+            messagebox.showerror("Error inesperado", "Consulte errores.log.")
+            return None
+        else:
+            self.actualizar()
+            messagebox.showinfo("Operacion exitosa", mensaje)
+            return resultado if resultado is not None else True
+        finally:
+            logging.info("Fin de accion de interfaz")
+
+    def crear_clientes(self):
+        p = self.paginas["Clientes"]
+        self.c = self.campos(p, ("ID", "Nombre", "Correo", "Telefono", "Edad"))
+        ttk.Button(p, text="Registrar cliente", command=self.registrar_cliente).grid(
+            row=5, column=1, sticky="e", pady=12)
+
+    def registrar_cliente(self):
+        self.ejecutar(
+            lambda: self.s.agregar(
+                self.s.clientes,
+                Cliente(*(self.valor(self.c, x) for x in
+                         ("ID", "Nombre", "Correo", "Telefono", "Edad")))
+            ), "Cliente registrado correctamente.")
+
+    def crear_servicios(self):
+        p = self.paginas["Servicios"]
+        ttk.Label(p, text="Tipo de servicio").grid(
+            row=0, column=0, sticky="w", padx=8)
+        self.tipo = ttk.Combobox(p, state="readonly",
+                                 values=("Sala", "Equipo", "Asesoria"))
+        self.tipo.grid(row=0, column=1, sticky="ew", padx=8)
+        self.tipo.current(0)
+        self.sv = self.campos(p, ("ID", "Nombre", "Precio"), 1)
+        self.etiqueta_extra = ttk.Label(p, text="Capacidad (personas)")
+        self.etiqueta_extra.grid(row=4, column=0, sticky="w", padx=8)
+        self.extra = ttk.Entry(p)
+        self.extra.grid(row=4, column=1, sticky="ew", padx=8)
+        self.tipo.bind("<<ComboboxSelected>>",
+                       lambda e: self.etiqueta_extra.config(
+                           text={"Sala": "Capacidad (personas)",
+                                 "Equipo": "Stock (unidades)",
+                                 "Asesoria": "Nivel: basica, avanzada o experta"}[self.tipo.get()]))
+        ttk.Button(p, text="Registrar servicio", command=self.registrar_servicio).grid(
+            row=5, column=1, sticky="e", pady=12)
+
+    def registrar_servicio(self):
+        def accion():
+            clases = {"Sala": Sala, "Equipo": Equipo, "Asesoria": Asesoria}
+            datos = [self.valor(self.sv, x) for x in ("ID", "Nombre", "Precio")]
+            servicio = clases[self.tipo.get()](*datos, self.extra.get().strip())
+            return self.s.agregar(self.s.servicios, servicio)
+        self.ejecutar(accion, "Servicio registrado correctamente.")
+
+    def crear_reservas(self):
+        p = self.paginas["Reservas"]
+        ttk.Label(p, text="Seleccione un cliente y un servicio; luego indique duracion e ID.",
+                  font=("Arial", 10, "bold")).grid(
+                      row=0, column=0, columnspan=2, sticky="w", pady=7)
+        self.r = self.campos(p, ("ID reserva", "Duracion"), 1)
+        self.combos = {}
+        for fila, nombre in ((3, "Cliente"), (4, "Servicio"), (9, "Reserva")):
+            ttk.Label(p, text=nombre).grid(
+                row=fila, column=0, sticky="w", padx=8, pady=7)
+            combo = ttk.Combobox(p, state="readonly", width=60)
+            combo.grid(row=fila, column=1, sticky="ew", padx=8, pady=7)
+            self.combos[nombre] = combo
+        self.combos["Servicio"].bind(
+            "<<ComboboxSelected>>", lambda e: self.regla_servicio())
+        self.regla = ttk.Label(
+            p, text="Primero registre un servicio en la pestana Servicios.")
+        self.regla.grid(row=5, column=0, columnspan=2, sticky="w", padx=8, pady=5)
+        ttk.Button(p, text="Crear reserva", command=self.registrar_reserva).grid(
+            row=6, column=1, sticky="e", pady=9)
+        ttk.Label(p, text="Impuesto (%)").grid(
+            row=7, column=0, sticky="w", padx=8)
+        ttk.Label(p, text="Descuento (%)").grid(
+            row=8, column=0, sticky="w", padx=8)
+        self.impuesto = ttk.Entry(p)
+        self.descuento = ttk.Entry(p)
+        self.impuesto.grid(row=7, column=1, sticky="ew", padx=8, pady=5)
+        self.descuento.grid(row=8, column=1, sticky="ew", padx=8, pady=5)
+        self.impuesto.insert(0, "19")
+        self.descuento.insert(0, "0")
+        ttk.Label(p, text="Escriba 19 para 19% o 5 para 5%. Se aplican al confirmar.").grid(
+            row=10, column=0, columnspan=2, sticky="w", padx=8, pady=5)
+        barra = ttk.Frame(p)
+        barra.grid(row=11, column=0, columnspan=2, pady=9)
+        for i, (nombre, accion) in enumerate((
+            ("Confirmar", self.confirmar),
+            ("Cancelar", self.cancelar),
+            ("Procesar", self.procesar),
+            ("Actualizar listas", self.actualizar)
+        )):
+            ttk.Button(barra, text=nombre, command=accion).grid(
+                row=0, column=i, padx=7)
+        self.detalle = ttk.Label(
+            p, text="No hay reserva seleccionada.", wraplength=720)
+        self.detalle.grid(row=12, column=0, columnspan=2,
+                         sticky="w", padx=8, pady=10)
+        self.combos["Reserva"].bind(
+            "<<ComboboxSelected>>", lambda e: self.mostrar_detalle())
+
+    def codigo_combo(self, nombre):
+        valor = self.combos[nombre].get()
+        if not valor:
+            raise DatosInvalidos(f"Seleccione {nombre.lower()} registrado.")
+        return valor.split(" | ", 1)[0]
+
+    def regla_servicio(self):
+        try:
+            codigo = self.codigo_combo("Servicio")
+            servicio = self.s.buscar(self.s.servicios, codigo)
+            self.regla.config(
+                text=servicio.regla() if servicio else "Seleccione un servicio.")
+        except ErrorFJ:
+            self.regla.config(text="Primero registre un servicio en Servicios.")
+
+    def registrar_reserva(self):
+        def accion():
+            return self.s.crear_reserva(
+                self.valor(self.r, "ID reserva"),
+                self.codigo_combo("Cliente"),
+                self.codigo_combo("Servicio"),
+                self.valor(self.r, "Duracion")
+            )
+        reserva = self.ejecutar(accion, "Reserva creada en estado PENDIENTE.")
+        if isinstance(reserva, Reserva):
+            self.seleccionar("Reserva", reserva.codigo)
+            self.mostrar_detalle()
+
+    def reserva_actual(self):
+        codigo = self.codigo_combo("Reserva")
+        r = self.s.buscar(self.s.reservas, codigo)
+        if r is None:
+            raise ReservaInvalida("Seleccione una reserva creada.")
+        return r
+
+    def porcentaje(self, entrada, nombre):
+        return numero(entrada.get(), f"{nombre} (%)", 0, 100) / 100
+
+    def confirmar(self):
+        resultado = self.ejecutar(
+            lambda: self.reserva_actual().confirmar(
+                self.porcentaje(self.impuesto, "Impuesto"),
+                self.porcentaje(self.descuento, "Descuento")
+            ), "Reserva confirmada correctamente.")
+        self.mostrar_detalle()
+        return resultado
+
+    def cancelar(self):
+        self.ejecutar(
+            lambda: self.reserva_actual().cancelar(), "Reserva cancelada.")
+        self.mostrar_detalle()
+
+    def procesar(self):
+        self.ejecutar(
+            lambda: self.reserva_actual().procesar(), "Reserva procesada.")
+        self.mostrar_detalle()
+
+    def seleccionar(self, nombre, codigo):
+        combo = self.combos[nombre]
+        for valor in combo["values"]:
+            if valor.split(" | ", 1)[0] == codigo:
+                combo.set(valor)
+                return
+
+    def actualizar(self):
+        if not hasattr(self, "combos"):
+            return
+        for nombre, lista in (
+            ("Cliente", self.s.clientes),
+            ("Servicio", self.s.servicios),
+            ("Reserva", self.s.reservas)
+        ):
+            combo = self.combos[nombre]
+            anterior = combo.get().split(" | ", 1)[0]
+            if nombre == "Cliente":
+                valores = [f"{x.codigo} | {x.nombre}" for x in lista]
+            elif nombre == "Servicio":
+                valores = [f"{x.codigo} | {x.nombre}" for x in lista]
+            else:
+                valores = [f"{x.codigo} | {x.estado}" for x in lista]
+            combo.configure(values=valores)
+            if valores:
+                ids = [x.codigo for x in lista]
+                seleccionado = anterior if anterior in ids else lista[0].codigo
+                self.seleccionar(nombre, seleccionado)
+            else:
+                combo.set("")
+        self.regla_servicio()
+        self.mostrar_detalle()
+        if hasattr(self, "consultas"):
+            self.escribir(self.consultas, self.s.resumen())
+
+    def mostrar_detalle(self):
+        if not hasattr(self, "detalle"):
+            return
+        codigo = self.combos["Reserva"].get().split(" | ", 1)[0]
+        reserva = self.s.buscar(self.s.reservas, codigo)
+        self.detalle.config(
+            text=reserva.describir() if reserva else "No hay reserva seleccionada.")
+
+    def area(self, p):
+        marco = ttk.Frame(p)
+        marco.pack(fill="both", expand=True)
+        scroll = ttk.Scrollbar(marco)
+        scroll.pack(side="right", fill="y")
+        caja = tk.Text(marco, wrap="word", font=("Consolas", 10),
+                       yscrollcommand=scroll.set)
+        caja.pack(side="left", fill="both", expand=True)
+        scroll.config(command=caja.yview)
+        return caja
+
+    def escribir(self, caja, contenido):
+        caja.config(state="normal")
+        caja.delete("1.0", tk.END)
+        caja.insert("1.0", contenido)
+        caja.config(state="disabled")
+
+    def crear_consultas(self):
+        p = self.paginas["Consultas"]
+        ttk.Button(p, text="Actualizar", command=self.actualizar).pack(pady=7)
+        self.consultas = self.area(p)
+
+    def crear_simulacion(self):
+        p = self.paginas["Simulacion"]
+        barra = ttk.Frame(p)
+        barra.pack(pady=7)
+        ttk.Button(barra, text="Ejecutar 23 operaciones",
+                   command=self.mostrar_simulacion).pack(side="left", padx=7)
+        ttk.Button(barra, text="Ver errores.log",
+                   command=self.ver_logs).pack(side="left", padx=7)
+        self.resultados = self.area(p)
+        self.escribir(
+            self.resultados,
+            "Ejecute 23 operaciones validas e invalidas. Los datos reales no se modifican."
+        )
+
+    def mostrar_simulacion(self):
+        try:
+            self.escribir(self.resultados, simular())
+        except Exception:
+            logging.exception("Error inesperado de simulacion")
+            messagebox.showerror("Error", "Consulte errores.log.")
+
+    def ver_logs(self):
+        try:
+            for h in logging.getLogger().handlers:
+                h.flush()
+            with open("errores.log", encoding="utf-8") as archivo:
+                self.escribir(self.resultados, archivo.read())
+        except OSError as exc:
+            logging.error("No se puede leer log: %s", exc)
+            messagebox.showerror("Error de archivo", str(exc))
+
+if __name__ == "__main__":
+    try:
+        Aplicacion().mainloop()
+    except Exception:
+        logging.exception("Fallo general del sistema")
+        raise 
